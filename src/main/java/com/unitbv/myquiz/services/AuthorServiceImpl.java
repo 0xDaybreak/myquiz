@@ -2,17 +2,17 @@ package com.unitbv.myquiz.services;
 
 import com.unitbv.myquiz.dto.AuthorDto;
 import com.unitbv.myquiz.entities.Author;
-import com.unitbv.myquiz.entities.Question;
 import com.unitbv.myquiz.entities.QuestionType;
+import com.unitbv.myquiz.entities.QuizAuthor;
 import com.unitbv.myquiz.repositories.AuthorErrorRepository;
 import com.unitbv.myquiz.repositories.AuthorRepository;
 import com.unitbv.myquiz.repositories.QuestionRepository;
+import com.unitbv.myquiz.repositories.QuizAuthorRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
@@ -24,6 +24,7 @@ import java.util.List;
 
 @Service
 public class AuthorServiceImpl implements AuthorService{
+    private final QuizAuthorRepository quizAuthorRepository;
     Logger log = LoggerFactory.getLogger(AuthorServiceImpl.class.getName());
     AuthorRepository authorRepository;
     AuthorErrorRepository authorErrorRepository;
@@ -37,10 +38,11 @@ public class AuthorServiceImpl implements AuthorService{
     public AuthorServiceImpl(
             AuthorRepository authorRepository,
             AuthorErrorRepository authorErrorRepository,
-            QuestionService questionService) {
+            QuestionService questionService, QuizAuthorRepository quizAuthorRepository) {
         this.authorRepository = authorRepository;
         this.authorErrorRepository = authorErrorRepository;
         this.questionService = questionService;
+        this.quizAuthorRepository = quizAuthorRepository;
     }
 
     public String extractAuthorNameFromPath(String filePath) {
@@ -78,7 +80,8 @@ public class AuthorServiceImpl implements AuthorService{
     public Author saveAuthor(Author author) {
         Author authorDb = authorRepository.findByName(author.getName()).orElse(null);
         if (authorDb != null) {
-            log.info("Author '{}' already exists in the database", author.getName());
+            log.atInfo().addArgument(author.getName())
+               .log("Author '{}' already exists in the database");
             return authorDb;
         }
         return authorRepository.save(author);
@@ -99,16 +102,28 @@ public class AuthorServiceImpl implements AuthorService{
 
     public AuthorDto getAuthorDTO(Author author) {
         AuthorDto authorDto = new AuthorDto(author);
-        authorDto.setNumberOfMultipleChoiceQuestions(
-                author.getQuestions().stream()
-                      .filter(q -> q.getType().equals(QuestionType.MULTICHOICE))
-                      .count()
-        );
-        authorDto.setNumberOfTrueFalseQuestions(
-                author.getQuestions().stream()
-                      .filter(q -> q.getType().equals(QuestionType.TRUEFALSE))
-                      .count()
-        );
+        author.getQuizAuthors().forEach(quizAuthor -> {
+            long noMC = quizAuthor.getQuestions().stream()
+                                  .filter(q -> q.getType().equals(QuestionType.MULTICHOICE))
+                                  .count();
+            authorDto.setNumberOfMultipleChoiceQuestions(authorDto.getNumberOfMultipleChoiceQuestions()+noMC);
+            long noTF = quizAuthor.getQuestions().stream()
+                                  .filter(q -> q.getType().equals(QuestionType.TRUEFALSE))
+                                  .count();
+            authorDto.setNumberOfTrueFalseQuestions(authorDto.getNumberOfTrueFalseQuestions()+noTF);
+            authorDto.setNumberOfErrors(authorDto.getNumberOfErrors()+quizAuthor.getQuizErrors().size());
+            authorDto.setNumberOfQuestions(authorDto.getNumberOfQuestions() + noMC + noTF);
+        });
+//        authorDto.setNumberOfMultipleChoiceQuestions(
+//                author.getQuestions().stream()
+//                      .filter(q -> q.getType().equals(QuestionType.MULTICHOICE))
+//                      .count()
+//        );
+//        authorDto.setNumberOfTrueFalseQuestions(
+//                author.getQuestions().stream()
+//                      .filter(q -> q.getType().equals(QuestionType.TRUEFALSE))
+//                      .count()
+//        );
         return authorDto;
     }
 
@@ -130,6 +145,9 @@ public class AuthorServiceImpl implements AuthorService{
 
     @Override
     public void addAuthorToList(Author author) {
+        if (authors == null) {
+            authors = new ArrayList<>();
+        }
         authors.add(author);
     }
 
@@ -142,4 +160,30 @@ public class AuthorServiceImpl implements AuthorService{
             log.error("Author with id '{}' not found", id);
         }
     }
+
+    @Override
+    public boolean authorNameExists(String name) {
+        boolean result = false;
+        Author author = authorRepository.findByName(name).orElse(null);
+        if (author != null) {
+            result = true;
+        }
+        return result;
+    }
+
+    @Override
+    public Author getAuthorByName(String name) {
+        return authorRepository.findByName(name).orElse(null);
+    }
+
+    @Override
+    public List<QuizAuthor> getQuizAuthorsForAuthorId(Long authorId) {
+        return quizAuthorRepository.findByAuthorId(authorId);
+    }
+
+    @Override
+    public void deleteQuizAuthorsByIds(List<Long> idsQA) {
+        quizAuthorRepository.deleteAllById(idsQA);
+    }
+
 }
